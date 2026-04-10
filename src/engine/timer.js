@@ -1,12 +1,13 @@
 const timers = {};
 
-function start(name, duration, onEnd) {
+function start(name, duration, onEnd, onTick) {
   stop(name);
 
   let timeLeft = duration;
 
   timers[name] = setInterval(() => {
     timeLeft--;
+    if (onTick) onTick(timeLeft);
 
     if (timeLeft <= 0) {
       stop(name);

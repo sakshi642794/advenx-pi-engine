@@ -4,6 +4,11 @@ class GameState {
 
     this.roundRemaining = null;
     this.spikeRemaining = null;
+    this.defuseRemaining = null;
+
+    this.roundTotal = null;
+    this.spikeTotal = null;
+    this.defuseTotal = null;
   }
 }
 

@@ -4,7 +4,7 @@ const { broadcast } = require("./wsServer");
 // Later this will send to backend WS
 function sendEvent(type, payload = {}) {
   const event = {
-    type,
+    event: type,
     payload,
     timestamp: Date.now(),
   };
