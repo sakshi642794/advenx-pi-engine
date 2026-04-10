@@ -88,7 +88,7 @@ usbWatcher.onRemove(() => {
 });
 
 console.log("\n=== CONTROLS ===");
-console.log("Press 'r' → Start Round");
+console.log("Press 's' -> Start Round");
 console.log("Press Ctrl+C → Exit\n");
 
 if (process.stdin && process.stdin.isTTY) {
@@ -97,7 +97,7 @@ if (process.stdin && process.stdin.isTTY) {
   process.stdin.setEncoding("utf8");
 
   process.stdin.on("data", (key) => {
-    if (key === "r") {
+    if (key === "s") {
       gameEngine.startRound();
     }
 
@@ -108,3 +108,5 @@ if (process.stdin && process.stdin.isTTY) {
 } else {
   console.log("Interactive controls disabled (no TTY).");
 }
+
+
