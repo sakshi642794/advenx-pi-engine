@@ -75,6 +75,8 @@ class GameEngine {
     console.log("PLANTING STARTED");
 
     gameState.state = stateEnum.PLANTING;
+    gameState.plantRemaining = config.PLANT_TIME;
+    gameState.plantTotal = config.PLANT_TIME;
     this.emitUpdate();
 
     const duration = config.PLANT_TIME;
@@ -82,6 +84,9 @@ class GameEngine {
 
     timer.start("plant", duration, () => {
       this.completePlant();
+    }, (remaining) => {
+      gameState.plantRemaining = remaining;
+      this.emitUpdate();
     });
 
     sendEvent("spike_planting", {
@@ -89,6 +94,8 @@ class GameEngine {
       round: gameState.currentRound,
       total_rounds: gameState.totalRounds,
       roundRemaining: gameState.roundRemaining,
+      plantRemaining: gameState.plantRemaining,
+      plantTotal: gameState.plantTotal,
       attackersScore: gameState.attackersScore,
       defendersScore: gameState.defendersScore,
     });
@@ -99,6 +106,8 @@ class GameEngine {
 
     gameState.state = stateEnum.ROUND_RUNNING;
     gameState.spikeRemaining = null;
+    gameState.plantRemaining = null;
+    gameState.plantTotal = null;
     this.emitUpdate();
 
     timer.stop("plant");
@@ -107,6 +116,8 @@ class GameEngine {
       round: gameState.currentRound,
       total_rounds: gameState.totalRounds,
       roundRemaining: gameState.roundRemaining,
+      plantRemaining: gameState.plantRemaining,
+      plantTotal: gameState.plantTotal,
       attackersScore: gameState.attackersScore,
       defendersScore: gameState.defendersScore,
     });
@@ -125,6 +136,7 @@ class GameEngine {
     console.log("SPIKE PLANTED");
 
     gameState.state = stateEnum.SPIKE_PLANTED;
+    gameState.plantRemaining = null;
     gameState.spikeRemaining = config.SPIKE_TIME;
     gameState.spikeTotal = config.SPIKE_TIME;
     this.emitUpdate();
@@ -158,8 +170,9 @@ class GameEngine {
     const duration = config.DEFUSE_TIME;
     const endTime = Date.now() + duration * 1000;
 
-    // Pause spike timer during defuse attempt
+    // Pause spike + round timers during defuse attempt
     timer.stop("spike");
+    timer.stop("round");
 
     timer.start("defuse", duration, () => {
       this.completeDefuse();
@@ -230,6 +243,7 @@ class GameEngine {
 
     gameState.state = stateEnum.ROUND_ENDED;
     gameState.roundRemaining = null;
+    gameState.plantRemaining = null;
     gameState.spikeRemaining = null;
     gameState.defuseRemaining = null;
     this.emitUpdate();
@@ -278,9 +292,11 @@ class GameEngine {
     gameState.attackersScore = 0;
     gameState.defendersScore = 0;
     gameState.roundRemaining = null;
+    gameState.plantRemaining = null;
     gameState.spikeRemaining = null;
     gameState.defuseRemaining = null;
     gameState.roundTotal = null;
+    gameState.plantTotal = null;
     gameState.spikeTotal = null;
     gameState.defuseTotal = null;
     this.emitUpdate();
