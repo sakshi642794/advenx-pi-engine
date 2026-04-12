@@ -202,6 +202,24 @@ class GameEngine {
 
     timer.stop("defuse");
 
+    if (typeof gameState.roundRemaining === "number") {
+      const roundDuration = gameState.roundRemaining;
+      const roundEndTime = Date.now() + roundDuration * 1000;
+      timer.start(
+        "round",
+        roundDuration,
+        () => {
+          console.log("ROUND TIMER FINISHED");
+          this.endRound("DEFENDER_WIN_TIME");
+        },
+        (remaining) => {
+          gameState.roundRemaining = remaining;
+          this.emitUpdate();
+        }
+      );
+      sendEvent("round_resumed", { endTime: roundEndTime });
+    }
+
     const remaining = typeof gameState.spikeRemaining === "number"
       ? gameState.spikeRemaining
       : config.SPIKE_TIME;
