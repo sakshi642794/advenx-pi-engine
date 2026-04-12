@@ -1,9 +1,63 @@
 const { startWSServer, broadcast } = require("./communication/wsServer");
 const { sendEvent } = require("./communication/eventSender");
+const { startBackendWS } = require("./communication/backendWSClient");
 const gameEngine = require("./engine/gameEngine");
 const gameState = require("./models/gameState");
 const stateEnum = require("./engine/state");
 const usbWatcher = require("./hardware/usbWatcher");
+const config = require("./config/config");
+
+let attackersReady = false;
+let defendersReady = false;
+let roundStartTimer = null;
+let lastEngineState = gameState.state;
+
+gameState.totalRounds = config.TOTAL_ROUNDS;
+
+function clearRoundCountdown() {
+  if (roundStartTimer) {
+    clearTimeout(roundStartTimer);
+    roundStartTimer = null;
+  }
+}
+
+function setReady(team, ready) {
+  if (team === "attackers") attackersReady = ready;
+  if (team === "defenders") defendersReady = ready;
+  if (!ready) clearRoundCountdown();
+}
+
+function resetReadyState() {
+  attackersReady = false;
+  defendersReady = false;
+  clearRoundCountdown();
+}
+
+function maybeStartRoundCountdown() {
+  const bothReady = attackersReady && defendersReady;
+  const canStart =
+    gameState.state === stateEnum.IDLE || gameState.state === stateEnum.ROUND_ENDED;
+
+  if (!bothReady || !canStart || roundStartTimer) return;
+
+  const seconds = 3;
+  const endTime = Date.now() + seconds * 1000;
+  sendEvent("round_starting", { seconds, endTime });
+
+  roundStartTimer = setTimeout(() => {
+    roundStartTimer = null;
+    resetReadyState();
+    gameEngine.startRound();
+  }, seconds * 1000);
+}
+
+function handleReadyEvent(event) {
+  if (event === "attackers_ready") setReady("attackers", true);
+  if (event === "defenders_ready") setReady("defenders", true);
+  if (event === "attackers_not_ready") setReady("attackers", false);
+  if (event === "defenders_not_ready") setReady("defenders", false);
+  maybeStartRoundCountdown();
+}
 
 function handleOperatorMessage(msg) {
   if (!msg || !msg.event) return;
@@ -13,9 +67,11 @@ function handleOperatorMessage(msg) {
     case "defenders_ready":
       // Echo to other clients for multi-screen sync
       sendEvent(msg.event, msg.payload || {});
+      handleReadyEvent(msg.event);
       return;
 
     case "start_game":
+      resetReadyState();
       gameEngine.startRound();
       return;
 
@@ -36,6 +92,7 @@ function handleOperatorMessage(msg) {
       return;
 
     case "reset_game":
+      resetReadyState();
       gameEngine.resetGame();
       sendEvent("reset_game");
       return;
@@ -62,6 +119,39 @@ gameEngine.onUpdate((state) => {
     event: "game_update",
     payload: state,
   });
+
+  if (state.state !== lastEngineState) {
+    lastEngineState = state.state;
+    if (state.state === stateEnum.ROUND_ENDED) {
+      resetReadyState();
+    }
+  }
+});
+
+startBackendWS((msg) => {
+  if (!msg || !msg.event) return;
+
+  switch (msg.event) {
+    case "attackers_ready":
+    case "defenders_ready":
+    case "attackers_not_ready":
+    case "defenders_not_ready":
+      handleReadyEvent(msg.event);
+      break;
+    case "teams_ready": {
+      const aReady = msg.payload?.attackersReady;
+      const dReady = msg.payload?.defendersReady;
+      if (typeof aReady === "boolean") setReady("attackers", aReady);
+      if (typeof dReady === "boolean") setReady("defenders", dReady);
+      maybeStartRoundCountdown();
+      break;
+    }
+    case "reset_game":
+      resetReadyState();
+      break;
+    default:
+      break;
+  }
 });
 
 usbWatcher.start();

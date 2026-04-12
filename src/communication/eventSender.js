@@ -1,7 +1,7 @@
 const logger = require("../utils/logger");
 const { broadcast } = require("./wsServer");
+const backendClient = require("./backendClient"); // ← ADD
 
-// Later this will send to backend WS
 function sendEvent(type, payload = {}) {
   const event = {
     event: type,
@@ -9,11 +9,9 @@ function sendEvent(type, payload = {}) {
     timestamp: Date.now(),
   };
 
-  // ✅ For now: just log
   logger.info("[EVENT]", event);
-  broadcast(event);
-  // 🔮 Future:
-  // backendClient.send(event);
+  broadcast(event);             // local kiosk still gets it
+  backendClient.send(event);    // ← ADD: backend gets it → all other PCs
 }
 
 module.exports = { sendEvent };

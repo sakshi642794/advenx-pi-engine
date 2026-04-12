@@ -1,28 +1,28 @@
-const WebSocket = require("ws");
+// CHANGE THIS to your FastAPI backend IP
+// Same machine: "http://localhost:8000"
+// Different machine on LAN: "http://192.168.1.XXX:8000"
+// ngrok: "https://xxxx.ngrok.io"
+const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
 
-let ws;
+// CHANGE THIS if your frontend uses a different room name
+// Must match what frontend connects to: ws://BACKEND:8000/ws/ROOM_ID
+const ROOM_ID = process.env.ROOM_ID || "arena";
+// ────────────────────────────────────────────────────────────────────
 
-function connect() {
-  ws = new WebSocket("ws://<BACKEND_IP>:8000/ws");
-
-  ws.on("open", () => {
-    console.log("BACKEND CONNECTED");
-  });
-
-  ws.on("close", () => {
-    console.log("BACKEND DISCONNECTED");
-    setTimeout(connect, 2000);
-  });
-
-  ws.on("error", () => {
-    console.log("BACKEND ERROR");
-  });
-}
-
-function send(event) {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(event));
+async function send(event) {
+  try {
+    const res = await fetch(
+      `${BACKEND_URL}/api/v1/internal/pi?room_id=${ROOM_ID}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(event),
+      }
+    );
+    if (!res.ok) console.error("[PI] Backend rejected:", res.status);
+  } catch (err) {
+    console.error("[PI] Failed to send to backend:", err.message);
   }
 }
 
-module.exports = { connect, send };
+module.exports = { send };

@@ -26,11 +26,21 @@ class GameEngine {
   // ROUND START
   // -------------------------
   startRound() {
+    if (gameState.state === stateEnum.ROUND_RUNNING) return;
+
+    if (gameState.state === stateEnum.ROUND_ENDED) {
+      gameState.currentRound = Math.min(
+        gameState.currentRound + 1,
+        gameState.totalRounds
+      );
+    }
+
     console.log("ROUND STARTED");
 
     gameState.state = stateEnum.ROUND_RUNNING;
     gameState.roundRemaining = config.ROUND_TIME;
     gameState.roundTotal = config.ROUND_TIME;
+    gameState.totalRounds = config.TOTAL_ROUNDS;
 
     const duration = gameState.roundRemaining;
     const endTime = Date.now() + duration * 1000;
@@ -46,7 +56,13 @@ class GameEngine {
     });
 
     // send once (frontend calculates timer)
-    sendEvent("round_started", { endTime });
+    sendEvent("round_started", {
+      endTime,
+      round: gameState.currentRound,
+      total_rounds: gameState.totalRounds,
+      attackersScore: gameState.attackersScore,
+      defendersScore: gameState.defendersScore,
+    });
 
     // optional sync (multi-screen accuracy)
     sendEvent("sync", { serverTime: Date.now() });
@@ -68,7 +84,14 @@ class GameEngine {
       this.completePlant();
     });
 
-    sendEvent("spike_planting", { endTime });
+    sendEvent("spike_planting", {
+      endTime,
+      round: gameState.currentRound,
+      total_rounds: gameState.totalRounds,
+      roundRemaining: gameState.roundRemaining,
+      attackersScore: gameState.attackersScore,
+      defendersScore: gameState.defendersScore,
+    });
   }
 
   cancelPlant() {
@@ -80,7 +103,22 @@ class GameEngine {
 
     timer.stop("plant");
 
-    sendEvent("plant_canceled");
+    sendEvent("plant_canceled", {
+      round: gameState.currentRound,
+      total_rounds: gameState.totalRounds,
+      roundRemaining: gameState.roundRemaining,
+      attackersScore: gameState.attackersScore,
+      defendersScore: gameState.defendersScore,
+    });
+  }
+
+  startSpikeTimer(duration) {
+    timer.start("spike", duration, () => {
+      this.endRound("ATTACKER_WIN_EXPLODE");
+    }, (remaining) => {
+      gameState.spikeRemaining = remaining;
+      this.emitUpdate();
+    });
   }
 
   completePlant() {
@@ -94,14 +132,16 @@ class GameEngine {
     const duration = config.SPIKE_TIME;
     const endTime = Date.now() + duration * 1000;
 
-    timer.start("spike", duration, () => {
-      this.endRound("ATTACKER_WIN_EXPLODE");
-    }, (remaining) => {
-      gameState.spikeRemaining = remaining;
-      this.emitUpdate();
-    });
+    this.startSpikeTimer(duration);
 
-    sendEvent("spike_planted", { endTime });
+    sendEvent("spike_planted", {
+      endTime,
+      round: gameState.currentRound,
+      total_rounds: gameState.totalRounds,
+      spikeRemaining: gameState.spikeRemaining,
+      attackersScore: gameState.attackersScore,
+      defendersScore: gameState.defendersScore,
+    });
   }
 
   // -------------------------
@@ -118,6 +158,9 @@ class GameEngine {
     const duration = config.DEFUSE_TIME;
     const endTime = Date.now() + duration * 1000;
 
+    // Pause spike timer during defuse attempt
+    timer.stop("spike");
+
     timer.start("defuse", duration, () => {
       this.completeDefuse();
     }, (remaining) => {
@@ -125,7 +168,16 @@ class GameEngine {
       this.emitUpdate();
     });
 
-    sendEvent("defuse_start", { endTime });
+    sendEvent("defuse_start", {
+      endTime,
+      round: gameState.currentRound,
+      total_rounds: gameState.totalRounds,
+      spikeRemaining: gameState.spikeRemaining,
+      defuseRemaining: gameState.defuseRemaining,
+      roundRemaining: gameState.roundRemaining,
+      attackersScore: gameState.attackersScore,
+      defendersScore: gameState.defendersScore,
+    });
   }
 
   cancelDefuse() {
@@ -137,13 +189,36 @@ class GameEngine {
 
     timer.stop("defuse");
 
-    sendEvent("defuse_canceled");
+    const remaining = typeof gameState.spikeRemaining === "number"
+      ? gameState.spikeRemaining
+      : config.SPIKE_TIME;
+    const endTime = Date.now() + remaining * 1000;
+
+    this.startSpikeTimer(remaining);
+
+    sendEvent("defuse_canceled", {
+      endTime,
+      round: gameState.currentRound,
+      total_rounds: gameState.totalRounds,
+      spikeRemaining: remaining,
+      roundRemaining: gameState.roundRemaining,
+      attackersScore: gameState.attackersScore,
+      defendersScore: gameState.defendersScore,
+    });
   }
 
   completeDefuse() {
     console.log("SPIKE DEFUSED");
 
-    sendEvent("defuse_success");
+    timer.stop("spike");
+    sendEvent("defuse_success", {
+      round: gameState.currentRound,
+      total_rounds: gameState.totalRounds,
+      roundRemaining: gameState.roundRemaining,
+      spikeRemaining: gameState.spikeRemaining,
+      attackersScore: gameState.attackersScore,
+      defendersScore: gameState.defendersScore,
+    });
     this.endRound("DEFENDER_WIN_DEFUSE");
   }
 
@@ -166,11 +241,31 @@ class GameEngine {
       reason === "DEFENDER_WIN_TIME" || reason === "DEFENDER_WIN_DEFUSE";
 
     if (attackerWins) {
-      sendEvent("attackers_win", { reason });
+      gameState.attackersScore += 1;
+      sendEvent("attackers_win", {
+        reason,
+        round: gameState.currentRound,
+        total_rounds: gameState.totalRounds,
+        attackersScore: gameState.attackersScore,
+        defendersScore: gameState.defendersScore,
+      });
     } else if (defenderWins) {
-      sendEvent("defenders_win", { reason });
+      gameState.defendersScore += 1;
+      sendEvent("defenders_win", {
+        reason,
+        round: gameState.currentRound,
+        total_rounds: gameState.totalRounds,
+        attackersScore: gameState.attackersScore,
+        defendersScore: gameState.defendersScore,
+      });
     } else {
-      sendEvent("round_end", { reason });
+      sendEvent("round_end", {
+        reason,
+        round: gameState.currentRound,
+        total_rounds: gameState.totalRounds,
+        attackersScore: gameState.attackersScore,
+        defendersScore: gameState.defendersScore,
+      });
     }
   }
 
@@ -178,6 +273,10 @@ class GameEngine {
     console.log("GAME RESET");
 
     gameState.state = stateEnum.IDLE;
+    gameState.currentRound = 1;
+    gameState.totalRounds = config.TOTAL_ROUNDS;
+    gameState.attackersScore = 0;
+    gameState.defendersScore = 0;
     gameState.roundRemaining = null;
     gameState.spikeRemaining = null;
     gameState.defuseRemaining = null;
