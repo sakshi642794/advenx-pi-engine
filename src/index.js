@@ -233,19 +233,24 @@ function startBrowser() {
   });
 }
 
+function forwardToFrontend(event, payload = {}) {
+  if (!localStarted) return;
+  broadcast({ event, payload });
+}
+
 startBackendWS({
   onConnect: () => {
     backendConnected = true;
     startLocalServices();
     startFrontend();
-    broadcast({ event: "backend_status", payload: { connected: true } });
+    forwardToFrontend("backend_status", { connected: true });
     // Give frontend a moment to boot before opening Chromium
     setTimeout(startBrowser, 3000);
   },
   onDisconnect: () => {
     backendConnected = false;
     if (localStarted) {
-      broadcast({ event: "backend_status", payload: { connected: false } });
+      forwardToFrontend("backend_status", { connected: false });
     }
   },
   onMessage: (msg) => {
@@ -257,18 +262,18 @@ startBackendWS({
     case "defenders_ready":
     case "attackers_not_ready":
     case "defenders_not_ready":
-      sendEvent(msg.event, msg.payload || {});
+      forwardToFrontend(msg.event, msg.payload || {});
       handleReadyEvent(msg.event);
       break;
     case "both_teams_ready":
-      sendEvent("attackers_ready", {});
-      sendEvent("defenders_ready", {});
+      forwardToFrontend("attackers_ready", {});
+      forwardToFrontend("defenders_ready", {});
       handleReadyEvent("attackers_ready");
       handleReadyEvent("defenders_ready");
       break;
     case "no_team_ready":
-      sendEvent("attackers_not_ready", {});
-      sendEvent("defenders_not_ready", {});
+      forwardToFrontend("attackers_not_ready", {});
+      forwardToFrontend("defenders_not_ready", {});
       handleReadyEvent("attackers_not_ready");
       handleReadyEvent("defenders_not_ready");
       break;
@@ -277,13 +282,13 @@ startBackendWS({
       const dReady = msg.payload?.defendersReady;
       if (typeof aReady === "boolean") setReady("attackers", aReady);
       if (typeof dReady === "boolean") setReady("defenders", dReady);
-      sendEvent("teams_ready", msg.payload || {});
+      forwardToFrontend("teams_ready", msg.payload || {});
       maybeStartRoundCountdown();
       break;
     }
     case "reset_game":
       resetReadyState();
-      sendEvent("reset_game");
+      forwardToFrontend("reset_game");
       break;
     default:
       break;
