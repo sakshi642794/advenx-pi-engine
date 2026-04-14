@@ -136,18 +136,33 @@ startBackendWS((msg) => {
     case "defenders_ready":
     case "attackers_not_ready":
     case "defenders_not_ready":
+      sendEvent(msg.event, msg.payload || {});
       handleReadyEvent(msg.event);
+      break;
+    case "both_teams_ready":
+      sendEvent("attackers_ready", {});
+      sendEvent("defenders_ready", {});
+      handleReadyEvent("attackers_ready");
+      handleReadyEvent("defenders_ready");
+      break;
+    case "no_team_ready":
+      sendEvent("attackers_not_ready", {});
+      sendEvent("defenders_not_ready", {});
+      handleReadyEvent("attackers_not_ready");
+      handleReadyEvent("defenders_not_ready");
       break;
     case "teams_ready": {
       const aReady = msg.payload?.attackersReady;
       const dReady = msg.payload?.defendersReady;
       if (typeof aReady === "boolean") setReady("attackers", aReady);
       if (typeof dReady === "boolean") setReady("defenders", dReady);
+      sendEvent("teams_ready", msg.payload || {});
       maybeStartRoundCountdown();
       break;
     }
     case "reset_game":
       resetReadyState();
+      sendEvent("reset_game");
       break;
     default:
       break;
