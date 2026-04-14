@@ -6,11 +6,17 @@ const gameState = require("./models/gameState");
 const stateEnum = require("./engine/state");
 const usbWatcher = require("./hardware/usbWatcher");
 const config = require("./config/config");
+const path = require("path");
+const { spawn } = require("child_process");
 
 let attackersReady = false;
 let defendersReady = false;
 let roundStartTimer = null;
 let lastEngineState = gameState.state;
+let localStarted = false;
+let frontendStarted = false;
+let browserStarted = false;
+let backendConnected = false;
 
 gameState.totalRounds = config.TOTAL_ROUNDS;
 
@@ -110,25 +116,139 @@ function sendInitialState(ws) {
       payload: gameState,
     })
   );
+  ws.send(
+    JSON.stringify({
+      event: "backend_status",
+      payload: { connected: backendConnected },
+    })
+  );
 }
 
-startWSServer(8080, undefined, handleOperatorMessage, sendInitialState);
+function startLocalServices() {
+  if (localStarted) return;
+  localStarted = true;
 
-gameEngine.onUpdate((state) => {
-  broadcast({
-    event: "game_update",
-    payload: state,
+  startWSServer(8080, undefined, handleOperatorMessage, sendInitialState);
+
+  gameEngine.onUpdate((state) => {
+    broadcast({
+      event: "game_update",
+      payload: state,
+    });
+
+    if (state.state !== lastEngineState) {
+      lastEngineState = state.state;
+      if (state.state === stateEnum.ROUND_ENDED) {
+        resetReadyState();
+      }
+    }
   });
 
-  if (state.state !== lastEngineState) {
-    lastEngineState = state.state;
-    if (state.state === stateEnum.ROUND_ENDED) {
-      resetReadyState();
+  usbWatcher.start();
+  usbWatcher.onInsert(() => {
+    if (gameState.state === stateEnum.ROUND_RUNNING) {
+      gameEngine.startPlant();
+      return;
     }
-  }
-});
+    if (gameState.state === stateEnum.DEFUSING) {
+      gameEngine.cancelDefuse();
+    }
+  });
 
-startBackendWS((msg) => {
+  usbWatcher.onRemove(() => {
+    if (gameState.state === stateEnum.PLANTING) {
+      gameEngine.cancelPlant();
+      return;
+    }
+    if (gameState.state === stateEnum.SPIKE_PLANTED) {
+      gameEngine.startDefuse();
+      return;
+    }
+    // No-op on remove during DEFUSING; spec cancels on insert instead
+  });
+
+  console.log("\n=== CONTROLS ===");
+  console.log("Press 's' -> Start Round");
+  console.log("Press Ctrl+C → Exit\n");
+
+  if (process.stdin && process.stdin.isTTY) {
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.setEncoding("utf8");
+
+    process.stdin.on("data", (key) => {
+      if (key === "s") {
+        gameEngine.startRound();
+      }
+
+      if (key === "\u0003") {
+        process.exit();
+      }
+    });
+  } else {
+    console.log("Interactive controls disabled (no TTY).");
+  }
+}
+
+function startFrontend() {
+  if (frontendStarted) return;
+  frontendStarted = true;
+
+  const frontendDir =
+    process.env.FRONTEND_DIR ||
+    path.resolve(__dirname, "..", "..", "advenx-display");
+
+  console.log("[FRONTEND] Starting dev server in", frontendDir);
+
+  const child = spawn("npm", ["run", "dev", "--", "--host", "0.0.0.0", "--port", "3000"], {
+    cwd: frontendDir,
+    stdio: "inherit",
+    shell: true,
+  });
+
+  child.on("exit", (code) => {
+    console.warn("[FRONTEND] exited with code", code);
+    frontendStarted = false;
+  });
+}
+
+function startBrowser() {
+  if (browserStarted) return;
+  browserStarted = true;
+
+  const url = process.env.FRONTEND_URL || "http://localhost:3000";
+  const cmd =
+    "chromium-browser --kiosk --noerrdialogs --disable-infobars " +
+    "--autoplay-policy=no-user-gesture-required " +
+    url;
+
+  console.log("[BROWSER] Launching Chromium kiosk:", url);
+  const child = spawn(cmd, { stdio: "inherit", shell: true });
+  child.on("exit", (code) => {
+    console.warn("[BROWSER] exited with code", code);
+    browserStarted = false;
+    if (backendConnected) {
+      setTimeout(startBrowser, 2000);
+    }
+  });
+}
+
+startBackendWS({
+  onConnect: () => {
+    backendConnected = true;
+    startLocalServices();
+    startFrontend();
+    broadcast({ event: "backend_status", payload: { connected: true } });
+    // Give frontend a moment to boot before opening Chromium
+    setTimeout(startBrowser, 3000);
+  },
+  onDisconnect: () => {
+    backendConnected = false;
+    if (localStarted) {
+      broadcast({ event: "backend_status", payload: { connected: false } });
+    }
+  },
+  onMessage: (msg) => {
   if (!msg || !msg.event) return;
   console.log("[BACKEND WS] event:", msg.event, "payload:", msg.payload || {});
 
@@ -168,51 +288,7 @@ startBackendWS((msg) => {
     default:
       break;
   }
+  },
 });
-
-usbWatcher.start();
-usbWatcher.onInsert(() => {
-  if (gameState.state === stateEnum.ROUND_RUNNING) {
-    gameEngine.startPlant();
-    return;
-  }
-  if (gameState.state === stateEnum.DEFUSING) {
-    gameEngine.cancelDefuse();
-  }
-});
-
-usbWatcher.onRemove(() => {
-  if (gameState.state === stateEnum.PLANTING) {
-    gameEngine.cancelPlant();
-    return;
-  }
-  if (gameState.state === stateEnum.SPIKE_PLANTED) {
-    gameEngine.startDefuse();
-    return;
-  }
-  // No-op on remove during DEFUSING; spec cancels on insert instead
-});
-
-console.log("\n=== CONTROLS ===");
-console.log("Press 's' -> Start Round");
-console.log("Press Ctrl+C → Exit\n");
-
-if (process.stdin && process.stdin.isTTY) {
-  process.stdin.setRawMode(true);
-  process.stdin.resume();
-  process.stdin.setEncoding("utf8");
-
-  process.stdin.on("data", (key) => {
-    if (key === "s") {
-      gameEngine.startRound();
-    }
-
-    if (key === "\u0003") {
-      process.exit();
-    }
-  });
-} else {
-  console.log("Interactive controls disabled (no TTY).");
-}
 
 

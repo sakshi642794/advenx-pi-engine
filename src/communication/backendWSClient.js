@@ -16,7 +16,7 @@ function buildWsUrl() {
   return `${trimmed}/ws/${roomId}`;
 }
 
-function startBackendWS(onMessage) {
+function startBackendWS({ onMessage, onConnect, onDisconnect } = {}) {
   let ws = null;
   let reconnectTimer = null;
 
@@ -32,6 +32,7 @@ function startBackendWS(onMessage) {
 
     ws.on("open", () => {
       logger.info("[BACKEND WS] Connected");
+      if (onConnect) onConnect();
     });
 
     ws.on("message", (data) => {
@@ -46,6 +47,7 @@ function startBackendWS(onMessage) {
 
     ws.on("close", () => {
       logger.warn("[BACKEND WS] Disconnected. Reconnecting...");
+      if (onDisconnect) onDisconnect();
       scheduleReconnect();
     });
 
