@@ -130,6 +130,7 @@ gameEngine.onUpdate((state) => {
 
 startBackendWS((msg) => {
   if (!msg || !msg.event) return;
+  console.log("[BACKEND WS] event:", msg.event, "payload:", msg.payload || {});
 
   switch (msg.event) {
     case "attackers_ready":
