@@ -291,6 +291,9 @@ startBackendWS({
       forwardToFrontend("reset_game");
       break;
     default:
+      // Forward any other backend events (kill/revive, timer_speed_update, etc.)
+      // so local kiosk clients stay in sync with CO/admin actions.
+      forwardToFrontend(msg.event, msg.payload || {});
       break;
   }
   },
