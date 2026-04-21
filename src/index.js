@@ -1,4 +1,4 @@
-const { startWSServer, broadcast } = require("./communication/wsServer");
+const { startWSServer, broadcast, getClientCount } = require("./communication/wsServer");
 const { sendEvent } = require("./communication/eventSender");
 const { startBackendWS } = require("./communication/backendWSClient");
 const gameEngine = require("./engine/gameEngine");
@@ -17,6 +17,7 @@ let localStarted = false;
 let frontendStarted = false;
 let browserStarted = false;
 let backendConnected = false;
+let backendWsHandle = null;
 
 gameState.totalRounds = config.TOTAL_ROUNDS;
 
@@ -68,6 +69,33 @@ function handleReadyEvent(event) {
 function handleOperatorMessage(msg) {
   if (!msg || !msg.event) return;
 
+  const sendToBackendWs = (event, payload = {}) => {
+    try {
+      const ws = backendWsHandle?.getWs?.();
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ event, payload }));
+        return true;
+      }
+    } catch (_) {
+      // ignore and fall back to HTTP ingest
+    }
+    // Fallback: still broadcast locally + POST to backend ingest.
+    // Note: backend fast/slow activation requires WS path, so this
+    // fallback won't trigger timer_speed_update unless backend adds support.
+    sendEvent(event, payload);
+    return false;
+  };
+
+  const normalizePlayerId = (raw) => {
+    if (typeof raw !== "string") return null;
+    const pid = raw.trim().toUpperCase();
+    if (pid.length !== 2) return null;
+    const team = pid[0];
+    const num = pid[1];
+    if ((team === "A" || team === "D") && ["1", "2", "3", "4", "5"].includes(num)) return pid;
+    return null;
+  };
+
   switch (msg.event) {
     case "attackers_ready":
     case "defenders_ready":
@@ -75,6 +103,21 @@ function handleOperatorMessage(msg) {
       sendEvent(msg.event, msg.payload || {});
       handleReadyEvent(msg.event);
       return;
+
+    case "fast":
+    case "slow":
+      sendToBackendWs(msg.event, msg.payload || {});
+      return;
+
+    case "kill":
+    case "revive": {
+      const pid = normalizePlayerId(
+        msg.payload?.playerId || msg.payload?.player || msg.payload?.id
+      );
+      if (!pid) return;
+      sendToBackendWs(`${msg.event} ${pid}`);
+      return;
+    }
 
     case "start_game":
       resetReadyState();
@@ -104,6 +147,25 @@ function handleOperatorMessage(msg) {
       return;
 
     default:
+      // Allow sending raw string commands like:
+      // "kill A1", "revive D3", "A1-killed", "revive-A1"
+      if (typeof msg.event === "string") {
+        const raw = msg.event.trim();
+        const lower = raw.toLowerCase();
+        if (lower === "fast" || lower === "slow") {
+          sendToBackendWs(lower);
+          return;
+        }
+        if (lower.startsWith("kill ") || lower.startsWith("revive ")) {
+          sendToBackendWs(raw);
+          return;
+        }
+        if (/^([ad][1-5])[-_ ]?killed$/i.test(raw) || /^revive-([ad][1-5])$/i.test(raw)) {
+          // These are already concrete events; just broadcast through backend ingest too.
+          sendEvent(raw);
+          return;
+        }
+      }
       return;
   }
 }
@@ -235,10 +297,14 @@ function startBrowser() {
 
 function forwardToFrontend(event, payload = {}) {
   if (!localStarted) return;
+  const debug = process.env.RELAY_DEBUG === "1";
+  if (debug) {
+    console.log(`[RELAY] forward backend->hud event=${event} clients=${getClientCount()}`);
+  }
   broadcast({ event, payload });
 }
 
-startBackendWS({
+backendWsHandle = startBackendWS({
   onConnect: () => {
     backendConnected = true;
     startLocalServices();

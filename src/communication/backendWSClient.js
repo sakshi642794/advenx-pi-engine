@@ -19,6 +19,7 @@ function buildWsUrl() {
 function startBackendWS({ onMessage, onConnect, onDisconnect } = {}) {
   let ws = null;
   let reconnectTimer = null;
+  const debug = process.env.RELAY_DEBUG === "1";
 
   const connect = () => {
     const url = buildWsUrl();
@@ -39,6 +40,9 @@ function startBackendWS({ onMessage, onConnect, onDisconnect } = {}) {
       if (!onMessage) return;
       try {
         const msg = JSON.parse(data.toString());
+        if (debug && msg && msg.event) {
+          logger.info(`[BACKEND WS] recv event=${msg.event}`);
+        }
         onMessage(msg);
       } catch (err) {
         logger.warn("[BACKEND WS] Failed to parse message");
