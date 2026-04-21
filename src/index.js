@@ -71,7 +71,10 @@ function handleOperatorMessage(msg) {
 
   const sendToBackendWs = (event, payload = {}) => {
     try {
-      const ws = backendWsHandle?.getWs?.();
+      const ws =
+        backendWsHandle && typeof backendWsHandle.getWs === "function"
+          ? backendWsHandle.getWs()
+          : null;
       if (ws && ws.readyState === 1) {
         ws.send(JSON.stringify({ event, payload }));
         return true;
@@ -112,7 +115,7 @@ function handleOperatorMessage(msg) {
     case "kill":
     case "revive": {
       const pid = normalizePlayerId(
-        msg.payload?.playerId || msg.payload?.player || msg.payload?.id
+        (msg.payload && (msg.payload.playerId || msg.payload.player || msg.payload.id)) || null
       );
       if (!pid) return;
       sendToBackendWs(`${msg.event} ${pid}`);
@@ -305,17 +308,19 @@ function forwardToFrontend(event, payload = {}) {
 }
 
 // Start local relay immediately so the HUD can connect right away on boot.
-// Frontend + browser are launched once the backend WS is connected (previous behavior).
+// Also start the frontend + kiosk right away so the display comes up on boot
+// even if the backend is still connecting.
 startLocalServices();
+startFrontend();
 forwardToFrontend("backend_status", { connected: false });
+setTimeout(startBrowser, 3000);
 
 backendWsHandle = startBackendWS({
   onConnect: () => {
     backendConnected = true;
-    startFrontend();
     forwardToFrontend("backend_status", { connected: true });
-    // Give frontend a moment to boot before opening Chromium
-    setTimeout(startBrowser, 3000);
+    // If the kiosk/browser died earlier, bring it back once backend returns.
+    setTimeout(startBrowser, 500);
   },
   onDisconnect: () => {
     backendConnected = false;
@@ -346,8 +351,8 @@ backendWsHandle = startBackendWS({
       handleReadyEvent("defenders_not_ready");
       break;
     case "teams_ready": {
-      const aReady = msg.payload?.attackersReady;
-      const dReady = msg.payload?.defendersReady;
+      const aReady = msg.payload ? msg.payload.attackersReady : undefined;
+      const dReady = msg.payload ? msg.payload.defendersReady : undefined;
       if (typeof aReady === "boolean") setReady("attackers", aReady);
       if (typeof dReady === "boolean") setReady("defenders", dReady);
       forwardToFrontend("teams_ready", msg.payload || {});
