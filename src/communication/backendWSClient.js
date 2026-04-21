@@ -13,6 +13,10 @@ function buildWsUrl() {
   }
   const roomId = process.env.ROOM_ID || "arena";
   const trimmed = base.endsWith("/") ? base.slice(0, -1) : base;
+
+  // Accept either a base URL (ws://host:8000) or a full room endpoint (ws://host:8000/ws/arena).
+  if (/\/ws\/[^/]+$/i.test(trimmed)) return trimmed;
+
   return `${trimmed}/ws/${roomId}`;
 }
 

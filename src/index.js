@@ -304,20 +304,23 @@ function forwardToFrontend(event, payload = {}) {
   broadcast({ event, payload });
 }
 
+// Start local relay + HUD immediately so the kiosk comes up on boot even if the backend
+// takes time to become reachable.
+startLocalServices();
+startFrontend();
+forwardToFrontend("backend_status", { connected: false });
+setTimeout(startBrowser, 3000);
+
 backendWsHandle = startBackendWS({
   onConnect: () => {
     backendConnected = true;
-    startLocalServices();
-    startFrontend();
     forwardToFrontend("backend_status", { connected: true });
-    // Give frontend a moment to boot before opening Chromium
-    setTimeout(startBrowser, 3000);
+    // Ensure kiosk is running even if it exited earlier.
+    setTimeout(startBrowser, 500);
   },
   onDisconnect: () => {
     backendConnected = false;
-    if (localStarted) {
-      forwardToFrontend("backend_status", { connected: false });
-    }
+    forwardToFrontend("backend_status", { connected: false });
   },
   onMessage: (msg) => {
   if (!msg || !msg.event) return;
