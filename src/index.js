@@ -47,7 +47,7 @@ function maybeStartRoundCountdown() {
 
   if (!bothReady || !canStart || roundStartTimer) return;
 
-  const seconds = 3;
+  const seconds = 5;
   const endTime = Date.now() + seconds * 1000;
   sendEvent("round_starting", { seconds, endTime });
 
