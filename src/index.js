@@ -280,6 +280,13 @@ backendWsHandle = startBackendWS({
   },
   onMessage: (msg) => {
     if (!msg || !msg.event) return;
+    if (msg.event === "start_game") {
+      console.log("[BACKEND WS] recv start_game -> starting round");
+      resetReadyState();
+      gameEngine.startRound();
+      return;
+    }
+
     console.log("[BACKEND WS] recv (ignored by pi-engine):", msg.event, msg.payload || {});
   },
 });
