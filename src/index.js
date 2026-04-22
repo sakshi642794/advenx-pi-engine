@@ -69,36 +69,6 @@ function handleReadyEvent(event) {
 function handleOperatorMessage(msg) {
   if (!msg || !msg.event) return;
 
-  const sendToBackendWs = (event, payload = {}) => {
-    try {
-      const ws =
-        backendWsHandle && typeof backendWsHandle.getWs === "function"
-          ? backendWsHandle.getWs()
-          : null;
-      if (ws && ws.readyState === 1) {
-        ws.send(JSON.stringify({ event, payload }));
-        return true;
-      }
-    } catch (_) {
-      // ignore and fall back to HTTP ingest
-    }
-    // Fallback: still broadcast locally + POST to backend ingest.
-    // Note: backend fast/slow activation requires WS path, so this
-    // fallback won't trigger timer_speed_update unless backend adds support.
-    sendEvent(event, payload);
-    return false;
-  };
-
-  const normalizePlayerId = (raw) => {
-    if (typeof raw !== "string") return null;
-    const pid = raw.trim().toUpperCase();
-    if (pid.length !== 2) return null;
-    const team = pid[0];
-    const num = pid[1];
-    if ((team === "A" || team === "D") && ["1", "2", "3", "4", "5"].includes(num)) return pid;
-    return null;
-  };
-
   switch (msg.event) {
     case "attackers_ready":
     case "defenders_ready":
@@ -106,21 +76,6 @@ function handleOperatorMessage(msg) {
       sendEvent(msg.event, msg.payload || {});
       handleReadyEvent(msg.event);
       return;
-
-    case "fast":
-    case "slow":
-      sendToBackendWs(msg.event, msg.payload || {});
-      return;
-
-    case "kill":
-    case "revive": {
-      const pid = normalizePlayerId(
-        (msg.payload && (msg.payload.playerId || msg.payload.player || msg.payload.id)) || null
-      );
-      if (!pid) return;
-      sendToBackendWs(`${msg.event} ${pid}`);
-      return;
-    }
 
     case "start_game":
       resetReadyState();
@@ -150,25 +105,7 @@ function handleOperatorMessage(msg) {
       return;
 
     default:
-      // Allow sending raw string commands like:
-      // "kill A1", "revive D3", "A1-killed", "revive-A1"
-      if (typeof msg.event === "string") {
-        const raw = msg.event.trim();
-        const lower = raw.toLowerCase();
-        if (lower === "fast" || lower === "slow") {
-          sendToBackendWs(lower);
-          return;
-        }
-        if (lower.startsWith("kill ") || lower.startsWith("revive ")) {
-          sendToBackendWs(raw);
-          return;
-        }
-        if (/^([ad][1-5])[-_ ]?killed$/i.test(raw) || /^revive-([ad][1-5])$/i.test(raw)) {
-          // These are already concrete events; just broadcast through backend ingest too.
-          sendEvent(raw);
-          return;
-        }
-      }
+      // Admin commands no longer route through the Pi relay.
       return;
   }
 }
@@ -262,13 +199,28 @@ function startFrontend() {
   const frontendDir =
     process.env.FRONTEND_DIR ||
     path.resolve(__dirname, "..", "..", "advenx-display");
+  const backendHttpUrl = process.env.BACKEND_URL || "http://localhost:8000";
+  const backendWsUrl =
+    process.env.BACKEND_WS_URL ||
+    backendHttpUrl.replace(/^http(s)?:\/\//i, (m) =>
+      m.toLowerCase() === "https://" ? "wss://" : "ws://"
+    );
 
   console.log("[FRONTEND] Starting dev server in", frontendDir);
+  console.log("[FRONTEND] Admin WS URL:", backendWsUrl);
 
   const child = spawn("npm", ["run", "dev", "--", "--host", "0.0.0.0", "--port", "3000"], {
     cwd: frontendDir,
     stdio: "inherit",
     shell: true,
+    env: {
+      ...process.env,
+      VITE_WS_TARGET: process.env.VITE_WS_TARGET || "relay",
+      VITE_WS_URL: process.env.VITE_WS_URL || "ws://localhost:8080",
+      VITE_ROOM_ID: process.env.VITE_ROOM_ID || process.env.ROOM_ID || "arena",
+      VITE_ADMIN_WS_TARGET: process.env.VITE_ADMIN_WS_TARGET || "backend",
+      VITE_ADMIN_WS_URL: process.env.VITE_ADMIN_WS_URL || backendWsUrl,
+    },
   });
 
   child.on("exit", (code) => {
@@ -327,48 +279,8 @@ backendWsHandle = startBackendWS({
     forwardToFrontend("backend_status", { connected: false });
   },
   onMessage: (msg) => {
-  if (!msg || !msg.event) return;
-  console.log("[BACKEND WS] event:", msg.event, "payload:", msg.payload || {});
-
-  switch (msg.event) {
-    case "attackers_ready":
-    case "defenders_ready":
-    case "attackers_not_ready":
-    case "defenders_not_ready":
-      forwardToFrontend(msg.event, msg.payload || {});
-      handleReadyEvent(msg.event);
-      break;
-    case "both_teams_ready":
-      forwardToFrontend("attackers_ready", {});
-      forwardToFrontend("defenders_ready", {});
-      handleReadyEvent("attackers_ready");
-      handleReadyEvent("defenders_ready");
-      break;
-    case "no_team_ready":
-      forwardToFrontend("attackers_not_ready", {});
-      forwardToFrontend("defenders_not_ready", {});
-      handleReadyEvent("attackers_not_ready");
-      handleReadyEvent("defenders_not_ready");
-      break;
-    case "teams_ready": {
-      const aReady = msg.payload ? msg.payload.attackersReady : undefined;
-      const dReady = msg.payload ? msg.payload.defendersReady : undefined;
-      if (typeof aReady === "boolean") setReady("attackers", aReady);
-      if (typeof dReady === "boolean") setReady("defenders", dReady);
-      forwardToFrontend("teams_ready", msg.payload || {});
-      maybeStartRoundCountdown();
-      break;
-    }
-    case "reset_game":
-      resetReadyState();
-      forwardToFrontend("reset_game");
-      break;
-    default:
-      // Forward any other backend events (kill/revive, timer_speed_update, etc.)
-      // so local kiosk clients stay in sync with CO/admin actions.
-      forwardToFrontend(msg.event, msg.payload || {});
-      break;
-  }
+    if (!msg || !msg.event) return;
+    console.log("[BACKEND WS] recv (ignored by pi-engine):", msg.event, msg.payload || {});
   },
 });
 
