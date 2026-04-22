@@ -40,14 +40,12 @@ function resetReadyState() {
   clearRoundCountdown();
 }
 
-function maybeStartRoundCountdown() {
-  const bothReady = attackersReady && defendersReady;
+function startRoundCountdown(seconds = 5) {
   const canStart =
     gameState.state === stateEnum.IDLE || gameState.state === stateEnum.ROUND_ENDED;
 
-  if (!bothReady || !canStart || roundStartTimer) return;
+  if (!canStart || roundStartTimer) return;
 
-  const seconds = 5;
   const endTime = Date.now() + seconds * 1000;
   sendEvent("round_starting", { seconds, endTime });
 
@@ -56,6 +54,12 @@ function maybeStartRoundCountdown() {
     resetReadyState();
     gameEngine.startRound();
   }, seconds * 1000);
+}
+
+function maybeStartRoundCountdown() {
+  const bothReady = attackersReady && defendersReady;
+  if (!bothReady) return;
+  startRoundCountdown(5);
 }
 
 function handleReadyEvent(event) {
@@ -78,8 +82,7 @@ function handleOperatorMessage(msg) {
       return;
 
     case "start_game":
-      resetReadyState();
-      gameEngine.startRound();
+      startRoundCountdown(5);
       return;
 
     case "start_plant":
@@ -281,9 +284,8 @@ backendWsHandle = startBackendWS({
   onMessage: (msg) => {
     if (!msg || !msg.event) return;
     if (msg.event === "start_game") {
-      console.log("[BACKEND WS] recv start_game -> starting round");
-      resetReadyState();
-      gameEngine.startRound();
+      console.log("[BACKEND WS] recv start_game -> starting countdown");
+      startRoundCountdown(5);
       return;
     }
 
